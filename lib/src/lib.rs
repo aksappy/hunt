@@ -1,13 +1,18 @@
-use lang::Language;
-use unicode_segmentation::UnicodeSegmentation;
-use std::collections::{ HashSet, HashMap };
-use stop_words;
-use std::fs::{ File, read };
-use std::io::Write;
 use bincode;
+use lang::Language;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fs::{read, File};
+use std::io::{Error, Write};
+use stop_words;
 use strsim::levenshtein;
-use serde::{ Serialize, Deserialize };
+use unicode_segmentation::UnicodeSegmentation;
+use walkdir::{DirEntry, WalkDir};
 mod lang;
+
+struct HuntError {
+    pub message: String,
+}
 
 pub struct Hunt {
     pub index_file: String,
@@ -28,6 +33,14 @@ pub struct FMIndexCollection {
     indexes: Vec<FMIndex>,
 }
 
+fn is_valid_dir_entry(entry: Result<DirEntry, Error>) -> bool {
+    match entry {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+
 impl Hunt {
     pub fn new_with_english(index_file: String) -> Self {
         Self {
@@ -42,6 +55,19 @@ impl Hunt {
         }
     }
 
+    pub fn index_directory(&self, directory: String) -> Result<(), Error> {
+        let walker = WalkDir::new(directory).into_iter();
+        let paths : Vec<FMIndex> = walker
+            .filter_entry(|e| !is_hidden(e))
+            .map(|x| is_valid_dir_entry(x))
+            .map(|x| self.index_file(x.path().to_str().unwrap()).unwrap())
+            .collect();
+        let collection = FMIndexCollection {
+            indexes : paths
+        };
+        return self.save_fm_indexes(&collection, "index.bin");
+    }
+
     //TODO index a single file
     //TODO index multiple files
     //TODO index a directory of files
@@ -50,8 +76,6 @@ impl Hunt {
     //TODO save bin data to user input filename
     //TODO save bin data to user input filename and directory
     //TODO save bin data to default directory
-
-    
 
     /// Tokenizes text into unique lowercase words
     /// This method also filters out stop words
@@ -155,7 +179,7 @@ impl Hunt {
         &self,
         query: &str,
         max_distance: usize,
-        indices: &[FMIndex]
+        indices: &[FMIndex],
     ) -> Vec<(String, String, usize)> {
         let mut results = Vec::new();
 
@@ -203,6 +227,8 @@ impl Hunt {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -210,4 +236,49 @@ mod tests {
         let hunt = Hunt::new_with_english("test.txt".to_string());
         assert_eq!(hunt.language, Language::ENGLISH);
     }
+
+    #[test]
+    fn hunt_index_directory_must_generate_index_file() {
+        let hunt = Hunt::new_with_english("index.bin".to_string());
+        hunt.index_directory("./examples".to_string());
+        let path = Path::new("ID");
+        assert!(Path::new("ID").exists() == true);
+        std::fs::remove_file(path);
+    }
+    // error scenario when file cannot be created for some reason
+
+    #[test]
+    fn hunt_index_directory_must_generate_index_from_walking_directory() {
+        let hunt = Hunt::new_with_english("index.bin".to_string());
+        hunt.index_directory("./examples".to_string());
+        let indices = hunt.load_fm_indexes("index.bin");
+        match indices {
+            Ok(indices) => {
+                let response = hunt.search_exact("DIR2", &indices.indexes);
+                assert!(response.len() > 0);
+            }
+            Err(_) => assert!(false),
+        }
+    }
+
+    #[test]
+    fn hunt_index_directory_should_only_select_text_files() {
+        assert!(false);
+    }
+    #[test]
+    fn hunt_index_directory_should_allow_skipping_hidden_folders() {
+        assert!(false);
+    }
+    #[test]
+    fn hunt_index_directory_should_allow_skipping_provided_folders() {
+        assert!(false);
+    }
+}
+
+fn is_hidden(entry: &DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| s.starts_with("."))
+        .unwrap_or(false)
 }

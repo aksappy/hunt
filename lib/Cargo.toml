@@ -9,3 +9,4 @@ serde = {version = "1.0.217", features = ["derive"]}
 stop-words = "0.8.1"
 strsim = "0.11.1"
 unicode-segmentation = "1.12.0"
+walkdir = "2.5.0"
